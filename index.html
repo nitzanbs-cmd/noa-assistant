@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>העוזרת של נועה</title>
+<title>Fake-shroom</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#7a3e1d">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -59,7 +59,7 @@
 <div id="map"></div>
 <div id="top">
   <button id="back" style="display:none">→ חלקות</button>
-  <h1 id="title">העוזרת של נועה</h1>
+  <h1 id="title">Fake-shroom</h1>
   <span id="net">…</span>
 </div>
 <div id="alarm"></div>
@@ -76,6 +76,7 @@ var IMAGERY = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imager
 var params = new URLSearchParams(location.search);
 var DEMO = params.get('demo') === '1';   // local test: plan read from google/Plan.gs, no saving to Google
 var SIM = params.get('sim') === '1';     // tap on the map = my position
+var GAS = !!(window.google && google.script && google.script.run);   // served from Apps Script (owner only): no code, no offline tiles
 
 // ---------- small helpers ----------
 function $(id) { return document.getElementById(id); }
@@ -213,6 +214,9 @@ function checkOut() {
 
 // ---------- Google side ----------
 function api(body) {
+  if (GAS) return new Promise(function (res, rej) {
+    google.script.run.withSuccessHandler(function (s) { res(JSON.parse(s)); }).withFailureHandler(rej).api(JSON.stringify(body));
+  });
   if (!API_URL) return Promise.reject(new Error('no API'));
   return fetch(API_URL, { method:'POST', body:JSON.stringify(body), headers:{ 'Content-Type':'text/plain;charset=utf-8' } })
     .then(function (r) { return r.json(); });
@@ -284,7 +288,7 @@ function downloadTiles(s, btn) {
 // ---------- screens ----------
 function showSites() {
   site = null; working = false; curTask = null; releaseWake();
-  $('back').style.display = 'none'; $('title').textContent = 'העוזרת של נועה'; $('alarm').style.display = 'none';
+  $('back').style.display = 'none'; $('title').textContent = 'Fake-shroom'; $('alarm').style.display = 'none';
   gridLayer.clearLayers(); labelLayer.clearLayers(); planLayer.clearLayers(); map.removeLayer(labelLayer);
   var b = L.latLngBounds([]); DATA.sites.forEach(function (s) { b.extend(s.polygon[0]); });
   map.fitBounds(b, { padding:[30, 30], paddingBottomRight:[0, window.innerHeight * .45] });
@@ -298,10 +302,10 @@ function showSites() {
       (s.trails.length ? '' : ' · אין שביל מסומן') + (tiles[s.id] ? ' · מפה בטלפון ✓' : '') + '</div>' +
       '<div class="row"><button class="btn main" data-open="' + s.id + '">פתחי</button>' +
       '<a class="btn" style="text-decoration:none" target="_blank" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + s.center[0] + ',' + s.center[1] + '">נווטי לשם</a>' +
-      '<button class="btn" data-tiles="' + s.id + '">' + (tiles[s.id] ? 'הורידי שוב מפה' : 'הורידי מפה לשטח') + '</button></div></div>';
+      (GAS ? '' : '<button class="btn" data-tiles="' + s.id + '">' + (tiles[s.id] ? 'הורידי שוב מפה' : 'הורידי מפה לשטח') + '</button>') + '</div></div>';
   });
   h += '<div class="small" style="margin-top:10px">מציבה: <b>' + esc(placer || 'לא הוגדר') + '</b> · <a class="link" href="#" id="who">שינוי</a>' +
-       (PLAN ? '' : ' · <a class="link" href="#" id="codeBtn">הזנת קוד צוות</a>') + '</div>';
+       (PLAN || GAS ? '' : ' · <a class="link" href="#" id="codeBtn">הזנת קוד צוות</a>') + '</div>';
   $('panel').innerHTML = h;
   $('panel').querySelectorAll('[data-open]').forEach(function (el) { el.onclick = function () { openSite(+el.getAttribute('data-open')); }; });
   $('panel').querySelectorAll('[data-tiles]').forEach(function (el) { el.onclick = function () { downloadTiles(siteById(+el.getAttribute('data-tiles')), el); }; });
@@ -328,7 +332,7 @@ function openSite(id) {
   $('back').style.display = ''; $('title').textContent = site.name;
   map.fitBounds(L.polygon(site.polygon).getBounds(), { padding:[20, 20], paddingBottomRight:[0, window.innerHeight * .4] });
   drawGrid(site); startGps();
-  if (!DEMO && store('code') && navigator.onLine) loadPlan(store('code')).then(function () { if (site) { drawPlan(); working ? renderWork() : renderSite(); } }).catch(function () {});
+  if (!DEMO && (GAS || store('code')) && navigator.onLine) loadPlan(store('code') || '').then(function () { if (site) { drawPlan(); working ? renderWork() : renderSite(); } }).catch(function () {});
   drawPlan(); renderSite();
 }
 
@@ -343,12 +347,14 @@ function renderSite() {
     var cells = {}; p.tasks.forEach(function (t) { cells[t.cell] = 1; });
     h = '<div class="what">' + esc(p.name) + ': ' + n + ' פסלים ב־' + Object.keys(cells).length + ' תאים</div>' +
         '<div class="progress"><div style="width:' + (100 * d / n) + '%"></div></div><div class="small">' + d + ' מתוך ' + n + ' הוצבו</div>' +
+        '<div class="row"><button class="btn" id="inv" style="flex:1">📋 רשימת מלאי (' + invChecked(p) + '/' + n + ')</button></div>' +
         '<div class="row"><button class="btn ok" id="start">' + (d ? 'ממשיכות ▶' : 'התחלנו ▶') + '</button></div>' +
         '<div class="row"><button class="btn" id="list">רשימת המשימות</button></div><div id="listBox" style="display:none">' + taskList(p) + '</div>';
   }
   $('panel').innerHTML = h;
   if ($('codeBtn2')) $('codeBtn2').onclick = askCode;
   if ($('start')) $('start').onclick = startWork;
+  if ($('inv')) $('inv').onclick = renderInventory;
   if ($('list')) $('list').onclick = function () { var b = $('listBox'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
   bindList();
 }
@@ -375,7 +381,47 @@ function nextTask() {
   return fresh[0] || open[0] || null;
 }
 
+// ---------- inventory checklist (kept on this phone) ----------
+var TYPE_ORDER = ['אורניה', 'פקועה', 'אזנית', 'גושית'], SIZE_ORDER = ['קטנה', 'בינונית', 'גדולה'];
+function invMap() { return store('inv_' + site.id) || {}; }
+function invChecked(p) { var m = invMap(); return p.tasks.filter(function (t) { return m[t.unit_id]; }).length; }
+function renderInventory() {
+  var p = planFor(site.id), m = invMap();
+  var units = p.tasks.slice().sort(function (a, b) {
+    var ta = TYPE_ORDER.indexOf(a.type), tb = TYPE_ORDER.indexOf(b.type);
+    if (ta !== tb) return ta - tb;
+    var fa = a.heads > 1 ? 1 : 0, fb = b.heads > 1 ? 1 : 0;
+    if (fa !== fb) return fa - fb;
+    var sa = SIZE_ORDER.indexOf(a.size), sb = SIZE_ORDER.indexOf(b.size);
+    return sa !== sb ? sa - sb : (a.unit_id < b.unit_id ? -1 : 1);
+  });
+  var n = units.length, c = invChecked(p), heads = units.reduce(function (s, t) { return s + t.heads; }, 0);
+  var h = '<div class="what">📋 רשימת מלאי · ' + c + '/' + n + '</div>' +
+          '<div class="small">' + n + ' פסלים, ' + heads + ' פטריות. סמני ✓ כל פסל שנמצא בתיק.</div>' +
+          '<div class="progress"><div style="width:' + (100 * c / n) + '%"></div></div><table class="list">';
+  var lastType = '';
+  units.forEach(function (t) {
+    if (t.type !== lastType) { h += '<tr><td colspan="3" style="background:#f4f0ea"><b>' + esc(t.type) + '</b></td></tr>'; lastType = t.type; }
+    h += '<tr data-unit="' + esc(t.unit_id) + '" style="cursor:pointer"><td style="width:44px;font-size:24px;text-align:center">' + (m[t.unit_id] ? '✅' : '⬜') +
+         '</td><td><span class="uid">' + esc(t.unit_id) + '</span></td><td>' + esc(t.size) + (t.heads > 1 ? ' · ' + t.heads + ' פטריות' : '') + '</td></tr>';
+  });
+  h += '</table><div class="row"><button class="btn" id="invAll">סמני הכול</button><button class="btn" id="invNone">נקי הכול</button>' +
+       '<button class="btn main" id="invBack" style="flex:1">חזרה</button></div>';
+  $('panel').innerHTML = h;
+  $('panel').querySelectorAll('tr[data-unit]').forEach(function (tr) {
+    tr.onclick = function () { var mm = invMap(), u = tr.getAttribute('data-unit'); if (mm[u]) delete mm[u]; else mm[u] = 1; store('inv_' + site.id, mm); renderInventory(); };
+  });
+  $('invAll').onclick = function () { var mm = {}; units.forEach(function (t) { mm[t.unit_id] = 1; }); store('inv_' + site.id, mm); renderInventory(); };
+  $('invNone').onclick = function () { store('inv_' + site.id, {}); renderInventory(); };
+  $('invBack').onclick = function () { working ? renderWork() : renderSite(); };
+}
+
 function startWork(keepCur) {
+  var pl = planFor(site.id);
+  if (pl && keepCur !== true && !working) {
+    var miss = pl.tasks.length - invChecked(pl);
+    if (miss > 0 && !confirm('ברשימת המלאי חסרים ' + miss + ' פסלים בלי ✓. להתחיל בכל זאת?')) return;
+  }
   if (!askName()) { toast('צריך שם מציבה'); return; }
   working = true;
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
@@ -461,9 +507,9 @@ $('back').onclick = showSites;
 
 // ---------- start ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
-fetch('data.json').then(function (r) { return r.json(); }).then(function (d) {
+(window.EMBED_DATA ? Promise.resolve(window.EMBED_DATA) : fetch('data.json').then(function (r) { return r.json(); })).then(function (d) {
   DATA = d; drawSites();
-  var ready = DEMO && !PLAN ? loadPlan('') : Promise.resolve();
+  var ready = DEMO && !PLAN ? loadPlan('') : GAS ? loadPlan('').catch(function () {}) : Promise.resolve();
   ready.then(function () { showSites(); setNet(); flush(); });
 }).catch(function () { $('panel').innerHTML = 'לא הצלחתי לטעון את החלקות. צריך קליטה בפתיחה הראשונה.'; });
 </script>
